@@ -1,0 +1,17 @@
+import pandas as pd
+
+df = pd.read_csv('data.csv')
+df.head()
+pd.set_option('display.max_rows', 1500)
+pd.set_option('display.max_columns', 1500)
+pd.set_option('display.width', 1000)
+
+
+df.info(verbose = True)
+df.columns.get_loc("WTPM")
+
+df.iloc[:,:425] = df.iloc[:,:425].multiply(df.iloc[:,425], axis = 'index')
+df.head()
+#save to new file 
+
+df.to_csv('applied_weight_data.csv')
