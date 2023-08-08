@@ -1,0 +1,249 @@
+---
+title: "Dissertation"
+output: html_document
+date: "2023-08-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Required Packages: 
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(survey)
+library(haven)
+library(rempsyc)
+library(broom)
+library(report)
+library(effectsize)
+library(svyVGAM)
+library(aod)
+library(readr)
+library(tidymodels)
+library(stargazer)
+```
+
+### Dataset: 
+```{r}
+cius20 <- read_dta('cius2020_2022nov18_en.dta')
+```
+
+
+#### Some information about the dataset: 
+```{r}
+print("Class:")
+print(class(cius20))
+
+print("Dimensions:")
+print(dim(cius20))
+
+```
+- There are 17,409 records
+- There are 1,356 columns 
+
+
+## SURVEY DESIGN
+
+I'm assuming based on the documentation that the design is: 
+- Each record in the sample is assigned to a stratum within its province. (Stage 1)
+- Each stratum : a simple random sample without replacement is selected. (Stage 2)
+
+Stage 1: Stratified Sampling (Strata: province)
+Stage 2: Simple Random Sample without replacement : subset is households 
+
+Before anything, I have to make sure province and G_HCOMP are both factors. 
+
+```{r}
+
+cius20$province <- as.factor(cius20$province)
+cius20$g_hcomp <- as.factor(cius20$g_hcomp)
+cius20$pumfid <- as.factor(cius20$pumfid)
+```
+
+Now, the subset for phase 2 is the houses that are 1,2,3. 
+```{r}
+#subset_phase2 <- sample(which(cius20$g_hcomp %in% c('1','2','3')), )
+
+subset_phase2 <- cius20 %>% 
+    filter(g_hcomp %in% c('1','2','3'))
+
+head(subset_phase2$g_hcomp)
+```
+
+
+
+
+Define a variable for the unstratified stage:
+```{r}
+cius20 <- cius20 %>%
+    mutate(unstra = 1)
+
+head(cius20$unstra)
+```
+Weights for the provinces being chosen based on the % of respondents. 
+```{r}
+cius20 <- cius20 %>%
+    mutate(prov_wght = case_when(
+        province == '10' ~ 1.4,
+        province == '11' ~ 0.4,
+        province == '12' ~ 2.6,
+        province == '13' ~ 2.1,
+        province == '24' ~ 22.6,
+        province == '35' ~ 39.2,
+        province == '46' ~ 3.5,
+        province == '47' ~ 3.0,
+        province == '48' ~ 11.4,
+        province == '59' ~ 13.9
+    ))
+```
+
+
+```{r}
+twostage_design <- svydesign(
+    id = ~1 + 1,
+    data = cius20,
+    strata = ~province + unstra,
+    weights = ~prov_wght + wtpg
+)
+```
+
+Survey design: 
+```{r}
+twostage_design
+```
+A different version: 
+```{r}
+twostage_design_v01 <- svydesign(
+    id = ~1 + g_hcomp,
+    data = cius20,
+    strata = ~province + unstra,
+    weights = ~NULL + wtpg,
+    nest = TRUE
+)
+```
+
+
+```{r}
+svytotal(
+    ~gender,
+    twostage_design
+)
+```
+
+```{r}
+svytotal(
+    ~gender,
+    twostage_design_v01
+)
+```
+```{r}
+twostage_design_v02 <- svydesign(
+    id = ~1 + 1,
+    data = cius20,
+    strata = ~province + unstra,
+    weights = ~NULL + wtpg
+)
+```
+
+
+```{r}
+svytotal(
+    ~emp,
+    twostage_design_v02
+)
+```
+```{r}
+twostage_design_v03 <- svydesign(
+    id = ~1 + pumfid,
+    data = cius20,
+    strata = ~province + unstra,
+    weights = ~NULL + wtpg
+)
+```
+
+```{r}
+svytotal(
+    ~home_use,
+    twostage_design_v03
+)
+```
+Version 3 is the closest to the actual value:  33,505,139 with a total estimate of 31,635,259. 
+
+I'll use this: twostage_design_v03 as the sampling design. 
+
+```{r}
+twostage_design_v05 <- svydesign(
+    id = ~1 + factor(pumfid),
+    data = cius20,
+    strata = ~province + unstra,
+    weights = ~NULL + wtpg
+)
+```
+
+```{r}
+svytotal(
+    ~ed_g10,
+    twostage_design_v05
+)
+```
+Forget about all of that; the real data should have: 
+
+```{r}
+#generate 44,800 phone numbers: 10 digits 
+field_sample_phone_numbers <- seq(from = 1000000000, to = 1000044800, by = 1)
+
+#randomly sample 17,409 of these 
+phone_numbers <- sample(field_sample_phone_numbers, 17409, replace = FALSE)
+
+```
+
+```{r}
+#add the phone_numbers to cius 
+cius20 <- cius20 %>%
+    mutate(phone = phone_numbers)
+
+#make sure it is a factor 
+cius20$phone <- as.factor(cius20$phone)
+```
+
+Now, the sample design is: 
+
+```{r}
+sampling_design <- svydesign(
+    id = ~phone + 1,
+    data = cius20,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+```{r}
+sampling_design
+```
+```{r}
+svytotal(
+    ~factor(emp),
+    sampling_design
+)
+```
+Which is entirely correct! 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

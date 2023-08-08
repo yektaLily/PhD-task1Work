@@ -1,0 +1,269 @@
+---
+title: "Dissertation"
+output: html_document
+date: "2023-08-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Required Packages: 
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(survey)
+library(haven)
+library(rempsyc)
+library(broom)
+library(report)
+library(effectsize)
+library(svyVGAM)
+library(aod)
+library(readr)
+library(tidymodels)
+library(stargazer)
+```
+
+### Dataset: 
+```{r}
+cius20 <- read_dta('cius2020_2022nov18_en.dta')
+```
+
+
+#### Some information about the dataset: 
+```{r}
+print("Class:")
+print(class(cius20))
+
+print("Dimensions:")
+print(dim(cius20))
+
+```
+- There are 17,409 records
+- There are 1,356 columns 
+
+
+## SURVEY DESIGN
+
+I'm assuming based on the documentation that the design is: 
+- Each record in the sample is assigned to a stratum within its province. (Stage 1)
+- Each stratum : a simple random sample without replacement is selected. (Stage 2)
+
+Stage 1: Stratified Sampling (Strata: province)
+Stage 2: Simple Random Sample without replacement : subset is households 
+
+Before anything, I have to make sure province and G_HCOMP are both factors. 
+
+```{r}
+
+cius20$province <- as.factor(cius20$province)
+cius20$g_hcomp <- as.factor(cius20$g_hcomp)
+cius20$pumfid <- as.factor(cius20$pumfid)
+```
+
+Define a variable for the unstratified stage:
+```{r}
+cius20 <- cius20 %>%
+    mutate(unstra = 1)
+
+head(cius20$unstra)
+```
+Weights for the provinces being chosen based on the % of respondents. 
+```{r}
+cius20 <- cius20 %>%
+    mutate(prov_wght = case_when(
+        province == '10' ~ 1.4,
+        province == '11' ~ 0.4,
+        province == '12' ~ 2.6,
+        province == '13' ~ 2.1,
+        province == '24' ~ 22.6,
+        province == '35' ~ 39.2,
+        province == '46' ~ 3.5,
+        province == '47' ~ 3.0,
+        province == '48' ~ 11.4,
+        province == '59' ~ 13.9
+    ))
+```
+
+Forget about all of that; the real data should have: 
+
+```{r}
+#generate 44,800 phone numbers: 10 digits 
+field_sample_phone_numbers <- seq(from = 1000000000, to = 1000044800, by = 1)
+
+#randomly sample 17,409 of these 
+phone_numbers <- sample(field_sample_phone_numbers, 17409, replace = FALSE)
+
+```
+
+```{r}
+#add the phone_numbers to cius 
+cius20 <- cius20 %>%
+    mutate(phone = phone_numbers)
+
+#make sure it is a factor 
+cius20$phone <- as.factor(cius20$phone)
+```
+
+Now, the sample design is: 
+
+```{r}
+sampling_design <- svydesign(
+    id = ~phone + 1,
+    data = cius20,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+```{r}
+sampling_design
+```
+```{r}
+svytotal(
+    ~factor(emp),
+    sampling_design
+)
+```
+Which is entirely correct! 
+
+## Variable Segmentation 
+
+It's important to separate the factors from the continuous variables. 
+
+**CONTINUOUS**
+```{r}
+cius_continuous <- cius20 %>%
+    select(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot)
+
+```
+
+**CATEGORICAL**
+
+```{r}
+cius_cateogrical <- cius20 %>%
+    select(!c(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot))
+
+```
+
+```{r}
+dim(cius_cateogrical)
+```
+
+Now, apply the factorization function to all the categorical variables: 
+
+```{r}
+#cius_cateogrical <- cius_cateogrical %>%
+ #   mutate(across(1:1343, as.factor))
+```
+
+Do this to the cius20 data: 
+
+```{r}
+cius20 <- cius20 %>%
+    mutate_at(vars(-c(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot)), as.factor)
+
+```
+
+Testing this: 
+```{r}
+glimpse(cius20$int_use)
+glimpse(cius20$gender)
+glimpse(cius20$sum_gtot)
+```
+## Data Analysis
+
+A look at our dependent variable: 
+```{r}
+glimpse(cius20$ui_050d)
+```
+6 : valid skip 
+9 : not stated 
+
+I will turn this into a binary variable: 
+```{r}
+library(caret)
+```
+
+```{r}
+cius20_binary <- cius20 %>%
+    filter(ui_050d == '1' | ui_050d == '2')
+
+dim(cius20_binary)
+```
+
+
+```{r}
+#replace all 6's and 9's with nothing
+
+cius20_binary$ui_050d <- recode(
+    cius20_binary$ui_050d,
+    recodes = "2=0; 1=1; else=''"
+)
+```
+
+check factor: 
+```{r}
+glimpse(cius20_binary$ui_050d)
+```
+But, when you select a '6': 
+```{r}
+cius20 %>%
+    select(ui_050d) %>%
+    filter(ui_050d == '6')
+```
+
+But, 
+```{r}
+cius20 %>%
+    count(ui_050d)
+```
+
+
+
+
+
+
+### Functions for Tabulation
+```{r}
+tabular_against_mbanking <- function(this_thing){
+    tab <- svymean(
+        ~interaction(
+            ui_050d,
+            this_thing,
+            drop = TRUE
+        ),
+        sampling_design
+    )
+    
+    return(tab)
+}
+
+prettify <- function(table_, this_thing, values){
+    pretty <- ftable(
+        table_,
+        rownames = list(
+            fill = c("Use M-banking", "Not use M-banking"),
+            this_thing = values
+        )
+    )
+
+    return(round(pretty * 100, 1))
+}
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
