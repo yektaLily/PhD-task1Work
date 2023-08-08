@@ -1,6 +1,7 @@
 ---
 title: "Dissertation"
-output: html_document
+output:
+  html_document: default
 date: "2023-08-08"
 ---
 
@@ -164,8 +165,7 @@ Do this to the cius20 data:
 
 ```{r}
 cius20 <- cius20 %>%
-    mutate_at(vars(-c(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot)), as.factor)
-
+    mutate_at(vars(-c(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot, wtpg)), as.factor)
 ```
 
 Testing this: 
@@ -211,43 +211,84 @@ glimpse(cius20_binary$ui_050d)
 ```
 But, when you select a '6': 
 ```{r}
-cius20 %>%
+cius20_binary %>%
     select(ui_050d) %>%
     filter(ui_050d == '6')
 ```
 
-But, 
 ```{r}
-cius20 %>%
+cius20_binary %>%
     count(ui_050d)
 ```
 
+Run a design on binary dataset: 
 
+```{r}
+cius20_binary <- cius20_binary %>% 
+    mutate(wtpg = as.numeric(wtpg))
+```
 
+```{r}
+binary_s_design <- svydesign(
+    id = ~phone + 1,
+    data = cius20_binary,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
 
+Drop the bootstrap weights from the binary dataset: 
+```{r}
+#names of columns to drop: 
+#glimpse(tail(cius20_binary))
+
+# wrpg1 - wrpg1000
+bin_data <- cius20_binary %>%
+    select(!(wrpg1 : wrpg1000))
+
+```
+
+```{r}
+s_b_design <- svydesign(
+    id = ~phone + 1,
+    data = bin_data,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+making sure it's binary (0's and 1's):
+```{r}
+#replace all 6's and 9's with nothing
+
+bin_data$ui_050d <- recode(
+    bin_data$ui_050d,
+    recodes = "2=0; 1=1; else=''"
+)
+```
 
 
 ### Functions for Tabulation
 ```{r}
-tabular_against_mbanking <- function(this_thing){
+tabular_against_mbanking <- function(this_){
     tab <- svymean(
         ~interaction(
             ui_050d,
-            this_thing,
+            this_,
             drop = TRUE
         ),
-        sampling_design
+        s_b_design
     )
     
     return(tab)
 }
 
-prettify <- function(table_, this_thing, values){
+prettify <- function(table_, this_, values){
     pretty <- ftable(
         table_,
         rownames = list(
-            fill = c("Use M-banking", "Not use M-banking"),
-            this_thing = values
+            usage = c("Use M-banking", "Not use M-banking"),
+            levels = values
         )
     )
 
@@ -256,6 +297,165 @@ prettify <- function(table_, this_thing, values){
 
 
 ```
+
+### PRELIMINARY ANALYSIS 
+
+All the next few thousand lines of code do the same thing based on the following function: They get a variable name, and build a cross-tabulation table. This function is only for "factor" or categorical variables.  
+
+```{r}
+build_cross_tab <- function(this_){
+    #make the table 
+    var_tab <- tabular_against_mbanking(this_)
+
+    #get the factor levels 
+    var_values <- levels(this_)
+    
+    #make the table pretty
+    pretty_table_age <- prettify(var_tab, this_, var_values)
+
+    return(pretty_table_age)
+}
+
+```
+
+
+Starting from the first categorical variable: 
+
+```{r}
+build_cross_tab(bin_data$province)
+```
+
+```{r}
+build_cross_tab(bin_data$luc_rst)
+```
+
+```{r}
+build_cross_tab(bin_data$age_grp)
+```
+
+```{r}
+build_cross_tab(bin_data$gender)
+```
+For example, this shows: On average --- 39.4% of men use mobile banking while 9.3% don't This is very close for women with 41.9% and 9.4% respectively. 
+
+... do this for all variables. 
+
+.
+.
+.
+
+## CATEGORICAL VARIABLES - INDEPENDENT TEST
+To test the independence use the $\chi^2$-Squared test. The $H_0$ is independence of the variables. (not related)
+
+Again, going through the variables that are categorical; However, we must only use this on the actual dataset (no changes made to it : cius20, and sampling_design)
+
+```{r}
+glimpse(head(cius20$ui_050d))
+```
+
+```{r}
+svychisq(
+        ~ui_050d + province,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + luc_rst,
+        sampling_design
+    )
+```
+
+```{r}
+svychisq(
+        ~ui_050d + age_grp,
+        sampling_design
+    )
+```
+
+```{r}
+svychisq(
+        ~ui_050d + gender,
+        sampling_design
+    )
+```
+This means "gender" is unrelated. We can set it aside from the analysis, and we clearly saw this in the tabulation. 
+
+```{r}
+svychisq(
+        ~ui_050d + home_use,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + g_abm,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + lan_g01,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + emp,
+        sampling_design
+    )
+```
+And so on for the rest of the categorical variables... 
+
+
+### VISUALIZATIONS 
+We can visualize the relationships: 
+
+```{r}
+#copy the dataset --- just for visualizations: 
+library(stringr)
+
+just_for_vis <- cius20 %>%
+    mutate(ui_050d = str_replace(ui_050d, "1", "Use")) %>%
+    mutate(ui_050d = str_replace(ui_050d, "2", "No_Use")) %>%
+    mutate(ui_050d = str_replace(ui_050d, "6", "Skip")) %>%
+    mutate(ui_050d = str_replace(ui_050d, "9", "NotStated"))
+```
+
+Visualizer for categorical variables: 
+```{r}
+svyboxplot(
+    #m-banking usage vs variable 
+    ui_050d ~ factor(emp), 
+    col = "gray80",
+    varwidth = TRUE, #change width based on numbers in the levels
+    ylab = "M-banking Usage",
+    xlab = "Employment",
+    design = sampling_design
+)
+```
+
+Most people are in the employed segment, and those are mostly around 1 (use bank). 
+
+
+A closer look into the differences between the groups, similar to AB testing: 
+
+```{r}
+draw_for_ab_test <- function(this_, x_lab){
+    palette <- c(Use = "#377EB8", No_Use = "#03f4fc", Skip = "black", NotStated = "gray80")
+
+    plot_ <- ggplot(cius20, aes(factor(this_), fill = factor(ui_050d))) + geom_bar() + labs(x = x_lab, y = "Online Banking Usage") 
+    
+    scale_fill_manual("Usage", values = palette)
+    
+    return(plot_)
+}
+```
+
+```{r}
+draw_for_ab_test(cius20$emp, "Employment")
+```
+
 
 
 
