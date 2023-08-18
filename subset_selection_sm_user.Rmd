@@ -88,12 +88,279 @@ print((tab_sm_users/total_users) * 100)
 ```
 That's basically only 12% of the data. Just over 2000 rows of data. 
 
+Let's say I save this into a dataset called "tabSM" and proceed with the previous analysis on this dataset: 
+```{r}
+tabSM <- df %>% 
+    filter(
+        (dv_010a == 1.0 | dv_010c == 1.0) & (dv_010b != 1.0 & dv_010d != 1 & dv_010d != 1.0 & dv_010e != 1.0 
+        & dv_010f != 1.0 & dv_010g != 1.0 & dv_010h != 1.0 & dv_010i != 1
+        ))
+```
+
+```{r}
+tabSM$province <- as.factor(tabSM$province)
+tabSM$g_hcomp <- as.factor(tabSM$g_hcomp)
+tabSM$pumfid <- as.factor(tabSM$pumfid)
+tabSM$ui_050d <- as.factor(tabSM$ui_050d)
+```
+
+Define a variable for the unstratified stage:
+```{r}
+tabSM <- tabSM %>%
+    mutate(unstra = 1)
+
+head(tabSM$unstra)
+```
 
 
+```{r}
+#generate 44,800 phone numbers: 10 digits 
+field_sample_phone_numbers <- seq(from = 1000000000, to = 1000044800, by = 1)
+
+#randomly sample 17,409 of these 
+phone_numbers <- sample(field_sample_phone_numbers, 2029, replace = FALSE)
+
+```
+
+```{r}
+#add the phone_numbers to cius 
+tabSM <- tabSM %>%
+    mutate(phone = phone_numbers)
+
+#make sure it is a factor 
+tabSM$phone <- as.factor(tabSM$phone)
+```
+
+Now, the sample design is: 
+
+```{r}
+sampling_design <- svydesign(
+    id = ~phone + 1,
+    data = tabSM,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+```{r}
+sampling_design
+```
+
+## Variable Segmentation 
+
+It's important to separate the factors from the continuous variables. 
+
+**CONTINUOUS**
+```{r}
+cius_continuous <- tabSM %>%
+    select(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot)
+
+```
+
+**CATEGORICAL**
+
+```{r}
+cius_cateogrical <- tabSM %>%
+    select(!c(ec_g010a, ec_g010b, ec_g010c, ec_g010d, ec_g010e, ec_g010f, ec_g010g, ec_g010h, ec_g010i, ec_g010j, ec_g010k, ec_g010l, ec_g010x, ec_g020a, ec_g050b, ec_g060a, sum_gtot))
+
+```
+
+```{r}
+dim(cius_cateogrical)
+```
+
+```{r}
+library(caret)
+
+```
+
+```{r}
+tab_binary <- tabSM %>%
+    filter(ui_050d == '1' | ui_050d == '2')
+
+dim(tab_binary)
+```
 
 
+```{r}
+#replace all 6's and 9's with nothing
+tab_binary$ui_050d <- recode(
+    tab_binary$ui_050d,
+    recodes = "2=0; 1=1;else=''"
+)
+```
+
+check factor: 
+```{r}
+glimpse(tab_binary$ui_050d)
+```
+But, when you select a '6': 
+```{r}
+tab_binary %>%
+    select(ui_050d) %>%
+    filter(ui_050d == '6')
+```
+
+```{r}
+tab_binary %>%
+    count(ui_050d)
+```
+
+Run a design on binary dataset: 
+
+```{r}
+tab_binary <- tab_binary %>% 
+    mutate(wtpg = as.numeric(wtpg))
+```
+
+```{r}
+binary_s_design <- svydesign(
+    id = ~phone + 1,
+    data = tab_binary,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+Drop the bootstrap weights from the binary dataset: 
+```{r}
+#names of columns to drop: 
+#glimpse(tail(cius20_binary))
+
+# wrpg1 - wrpg1000
+bin_data <- tab_binary %>%
+    select(!(wrpg1 : wrpg1000))
+
+```
+
+```{r}
+s_b_design <- svydesign(
+    id = ~phone + 1,
+    data = bin_data,
+    strata = ~province + factor(unstra),
+    weights = ~NULL + wtpg
+)
+```
+
+making sure it's binary (0's and 1's):
+```{r}
+#replace all 6's and 9's with nothing
+
+bin_data$ui_050d <- recode(
+    bin_data$ui_050d,
+    recodes = "2=0; 1=1; else=''"
+)
+```
 
 
+### Functions for Tabulation
+```{r}
+tabular_against_mbanking <- function(this_){
+    tab <- svymean(
+        ~interaction(
+            ui_050d,
+            this_,
+            drop = TRUE
+        ),
+        s_b_design
+    )
+    
+    return(tab)
+}
+
+prettify <- function(table_, this_, values){
+    pretty <- ftable(
+        table_,
+        rownames = list(
+            usage = c("Use M-banking", "Not use M-banking"),
+            levels = values
+        )
+    )
+
+    return(round(pretty * 100, 1))
+}
+
+
+```
+
+### PRELIMINARY ANALYSIS 
+
+All the next few thousand lines of code do the same thing based on the following function: They get a variable name, and build a cross-tabulation table. This function is only for "factor" or categorical variables.  
+
+```{r}
+build_cross_tab <- function(this_){
+    #make the table 
+    var_tab <- tabular_against_mbanking(this_)
+
+    #get the factor levels 
+    var_values <- levels(this_)
+    
+    #make the table pretty
+    pretty_table_age <- prettify(var_tab, this_, var_values)
+
+    return(pretty_table_age)
+}
+
+```
+
+
+Starting from the first categorical variable: 
+
+```{r}
+build_cross_tab(bin_data$province)
+```
+
+```{r}
+bin_data$age_grp <- as.factor(bin_data$age_grp)
+build_cross_tab(bin_data$age_grp)
+```
+```{r}
+bin_data$emp <- as.factor(bin_data$emp)
+build_cross_tab(bin_data$emp)
+```
+
+
+... do this for all variables. 
+
+.
+.
+.
+
+## CATEGORICAL VARIABLES - INDEPENDENT TEST
+To test the independence use the $\chi^2$-Squared test. The $H_0$ is independence of the variables. (not related)
+
+Again, going through the variables that are categorical; However, we must only use this on the actual dataset (no changes made to it : cius20, and sampling_design)
+
+```{r}
+glimpse(head(tabSM$ui_050d))
+```
+
+```{r}
+svychisq(
+        ~ui_050d + province,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + age_grp,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + emp,
+        sampling_design
+    )
+```
+```{r}
+svychisq(
+        ~ui_050d + gender,
+        sampling_design
+    )
+```
+
+Alright, it's working as I had expected! 
 
 
 
