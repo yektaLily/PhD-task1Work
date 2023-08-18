@@ -1,0 +1,103 @@
+---
+title: "subset_selection_sm_user"
+output: html_document
+date: "2023-08-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggplot2)
+library(survey)
+library(haven)
+library(rempsyc)
+library(broom)
+library(report)
+library(effectsize)
+library(readr)
+library(tidymodels)
+library(aod)
+```
+```{r}
+cius <- read_dta('cius2020_2022nov18_en.dta')
+```
+
+```{r}
+df <- data.frame(cius)
+```
+
+Select the ones that meet the following conditions: 
+- smartphone use only 
+
+step1. See all the device options in the dataset: 
+```{r}
+df %>% 
+    select(matches("dv_010"))
+```
+
+Those are:
+- smartphone
+- laptop
+- tablet 
+- pc 
+- media streaming device 
+- smart TV
+- internet-connected wearable smart device 
+- connected vehicle 
+- other devices 
+
+Only selecting those that use smartphone but nothing else: 
+```{r}
+df %>% 
+    filter(
+        dv_010a == 1.0 & dv_010b != 1.0 & dv_010c != 1.0 & dv_010d != 1 & dv_010d != 1.0 & dv_010e != 1.0 
+        & dv_010f != 1.0 & dv_010g != 1.0 & dv_010h != 1.0 & dv_010i != 1
+        )
+```
+That is 1,015 rows of the dataset. 
+
+```{r}
+only_sm_users <- 1015
+total_users <- 17409 
+
+print('percentage of only smartphone users data available: ')
+print((only_sm_users/total_users) * 100)
+```
+Only about 6%. If we consider the tablet + smartphone users...
+```{r}
+df %>% 
+    filter(
+        (dv_010a == 1.0 | dv_010c == 1.0) & (dv_010b != 1.0 & dv_010d != 1 & dv_010d != 1.0 & dv_010e != 1.0 
+        & dv_010f != 1.0 & dv_010g != 1.0 & dv_010h != 1.0 & dv_010i != 1
+        ))
+```
+
+```{r}
+
+tab_sm_users <- 2029
+
+print('percentage of tablet or smartphone users data available: ')
+print((tab_sm_users/total_users) * 100)
+```
+That's basically only 12% of the data. Just over 2000 rows of data. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
