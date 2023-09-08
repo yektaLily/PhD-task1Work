@@ -1,0 +1,146 @@
+---
+title: "CIUS18"
+output: html_document
+date: "2023-09-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# THE FILE 
+This file is the analysis done on the 2018 version of CIUS. 
+Publicly available: https://abacus.library.ubc.ca/dataset.xhtml?persistentId=hdl:11272.1/AB2/KWDCXH
+
+According to the accompanying documentation, the following are true: 
+
+### SURVEY DESIGN
+CIUS2018 was administered in 2018 from November 15th, 2018 to March 21, 2019. 
+
+- Each of the 10 provinces were divided into strata. 
+- Each record (telephone number) was assigned to a stratum within its province. 
+- A simple random sample without replacement of records was next selected in each stratum. 
+
+What does this mean? 
+- Each telephone number (household) was assigned to a stratum within its province. 
+- Each province is also a stratum. 
+- Then a simple random sample without replacement of records was selected from each stratum within each province. 
+
+**The documentation does not make it clear whether it is a two phased sampling design or a two stage sampling design --- to avoid making a mistake, both designs should be tested and the design that produces the correct results should be picked. However, the 2 phase sampling design cannot be implemented with the current information: **
+
+So, if it is a 2 phase sampling design: 
+Phase 1: Each province is broken into strata, *but no information on how this is done is shared, therefore whatever I come up with will be guess-work* -- phone numbers are assigned to each stratum within the provinces 
+Phase 2: A simple random sample of the records are selected from each stratum within each province, which are strata themselves. 
+
+Therefore, the 2 stage sampling design is defined here: 
+
+- Each record in the sample is assigned to a stratum within its province. (Stage 1)
+- In each stratum, a simple random sample without replacement is selected. (Stage 2)
+
+Stage 1: Stratified Sampling (Strata: province)
+Stage 2: Simple Random Sample without replacement : subset is households 
+
+
+---
+---
+---
+
+### Required Packages: 
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(survey)
+library(haven)
+library(rempsyc)
+library(broom)
+library(report)
+library(effectsize)
+library(svyVGAM)
+library(aod)
+library(readr)
+library(tidymodels)
+library(stargazer)
+```
+
+### DATA ANALYSIS 
+```{r}
+cius18 <- read_dta("cius_2018_en.dta")
+```
+
+#### Some information about the dataset: 
+```{r}
+print("Class:")
+print(class(cius18))
+
+print("Dimensions:")
+print(dim(cius18))
+
+```
+There are 13,810 rows of data and 1,426 columns (1000 of which are bootstrap weights, leaving 426 questions on the survey). 
+
+#### Making sure types are correct: 
+The variables I'll need for design of sampling are province and a few new variables I'll declare myself. However, I'll first make sure that province is viewed as a factor. 
+
+```{r}
+cius18$province <- as.factor(cius18$province)
+```
+
+#### STAGE 1 - Unstratified variable: 
+Just added a variable that is the same across all - because first stage isn't stratified. 
+```{r}
+cius18 <- cius18 %>% 
+    mutate(unstra_new_var = 1)
+
+head(cius18$unstra_new_var)
+```
+Generating some phone numbers: 
+```{r}
+#generate 33,248 phone numbers: 10 digits 
+field_sample_phone_numbers <- seq(from = 1000000000, to = 1000033247, by = 1)
+
+#randomly sample 13,810 of these 
+phone_numbers <- sample(field_sample_phone_numbers, 13810, replace = FALSE)
+
+```
+
+Then add these to the dataset: 
+```{r}
+#add the phone_numbers to cius 
+cius18 <- cius18 %>%
+    mutate(phone = phone_numbers)
+
+#make sure it is a factor 
+cius18$phone <- as.factor(cius18$phone)
+```
+
+### SAMPLING DESIGN: 
+```{r}
+sample_design <- svydesign(
+    id = ~phone + 1,
+    data = cius18,
+    strata = ~province + factor(unstra_new_var), 
+    weights = ~NULL + wtpm
+)
+```
+
+```{r}
+sample_design 
+```
+Checking if this worked correctly. 
+
+Employment: 
+```{r}
+svytotal(
+    ~factor(emp),
+    sample_design
+)
+```
+Which is exactly the same numbers as the documentation. 
+
+
+
+
+
+
+
