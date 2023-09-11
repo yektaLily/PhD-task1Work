@@ -1,0 +1,911 @@
+---
+title: "CIUS18"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-09-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Version Control**:
+- 00 until 06 : Sept 8th
+- 07 until  : 
+
+
+# THE FILE 
+This file is the analysis done on the 2018 version of CIUS. 
+Publicly available: https://abacus.library.ubc.ca/dataset.xhtml?persistentId=hdl:11272.1/AB2/KWDCXH
+
+According to the accompanying documentation, the following are true: 
+
+### OPENING
+CIUS2018 was administered in 2018 from November 15th, 2018 to March 21, 2019. 
+
+- Each of the 10 provinces were divided into strata. 
+- Each record (telephone number) was assigned to a stratum within its province. 
+- A simple random sample without replacement of records was next selected in each stratum. 
+
+What does this mean? 
+- Each telephone number (household) was assigned to a stratum within its province. 
+- Each province is also a stratum. 
+- Then a simple random sample without replacement of records was selected from each stratum within each province. 
+
+**The documentation does not make it clear whether it is a two phased sampling design or a two stage sampling design --- to avoid making a mistake, both designs should be tested and the design that produces the correct results should be picked. However, the 2 phase sampling design cannot be implemented with the current information: **
+
+So, if it is a 2 phase sampling design: 
+Phase 1: Each province is broken into strata, *but no information on how this is done is shared, therefore whatever I come up with will be guess-work* -- phone numbers are assigned to each stratum within the provinces 
+Phase 2: A simple random sample of the records are selected from each stratum within each province, which are strata themselves. 
+
+Therefore, the 2 stage sampling design is defined here: 
+
+- Each record in the sample is assigned to a stratum within its province. (Stage 1)
+- In each stratum, a simple random sample without replacement is selected. (Stage 2)
+
+Stage 1: Stratified Sampling (Strata: province)
+Stage 2: Simple Random Sample without replacement : subset is households 
+
+
+---
+---
+---
+
+### Required Packages: 
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(survey)
+library(haven)
+library(rempsyc)
+library(broom)
+library(report)
+library(effectsize)
+library(svyVGAM)
+library(aod)
+library(readr)
+library(tidymodels)
+library(stargazer)
+```
+
+### DATA  
+```{r}
+cius18 <- read_dta("cius_2018_en.dta")
+```
+
+#### Some information about the dataset: 
+```{r}
+print("Class:")
+print(class(cius18))
+
+print("Dimensions:")
+print(dim(cius18))
+
+```
+There are 13,810 rows of data and 1,426 columns (1000 of which are bootstrap weights, leaving 426 questions on the survey). 
+
+#### Making sure types are correct: 
+The variables I'll need for design of sampling are province and a few new variables I'll declare myself. However, I'll first make sure that province is viewed as a factor. 
+
+```{r}
+cius18$province <- as.factor(cius18$province)
+```
+
+### SAMPLING DESIGN
+**STAGE 1 - Unstratified variable**: 
+Just added a variable that is the same across all - because first stage isn't stratified. 
+```{r}
+cius18 <- cius18 %>% 
+    mutate(unstra_new_var = 1)
+
+head(cius18$unstra_new_var)
+```
+Generating some phone numbers: 
+```{r}
+#generate 33,248 phone numbers: 10 digits 
+field_sample_phone_numbers <- seq(from = 1000000000, to = 1000033247, by = 1)
+
+#randomly sample 13,810 of these 
+phone_numbers <- sample(field_sample_phone_numbers, 13810, replace = FALSE)
+
+```
+
+Then add these to the dataset: 
+```{r}
+#add the phone_numbers to cius 
+cius18 <- cius18 %>%
+    mutate(phone = phone_numbers)
+
+#make sure it is a factor 
+cius18$phone <- as.factor(cius18$phone)
+```
+
+```{r}
+sample_design <- svydesign(
+    id = ~phone + 1,
+    data = cius18,
+    strata = ~province + factor(unstra_new_var), 
+    weights = ~NULL + wtpm
+)
+```
+
+```{r}
+sample_design 
+```
+Checking if this worked correctly. 
+
+Employment: 
+```{r}
+svytotal(
+    ~factor(emp),
+    sample_design
+)
+```
+Which is exactly the same numbers as the documentation. 
+
+---
+---
+---
+
+### DATA ANALYSIS 
+#### PART 1. Overview of dataset and variables 
+
+The most important step is to understand which of the columns are categorical and which ones are continuous variables. 
+
+First, I'll eliminate the bootrstap weight columns as they are not needed. 
+```{r}
+df <- data.frame(cius18)
+colnames(df)[500]
+```
+
+```{r}
+grep("wtpm", colnames(df))
+```
+
+```{r}
+which(colnames(df) == "WRPM1")
+```
+The last one: 
+```{r}
+which(colnames(df) == "WRPM1000")
+```
+
+```{r}
+small_cius18 <- cius18 %>%
+    select(-c(427:1426))
+```
+
+```{r}
+dim(small_cius18)
+```
+Done. Working dataset: small_cius18. 
+
+Since the dataset will not prove at all helpful in this task, this is done so using the PUMF file. The following are continuous variables: 
+
+List of continuous variable names + description: 
+
+EC_540A : $ spent on music subscriptions (0-3,000) valid skip 999996, not stated 999999
+EC_540B : $ spent on video subscriptions (0-5,000) valid skip 999996, not stated 999999
+EC_540C : $ spent on e-books (0-1,500) valid skip 999996, not stated 999999
+EC_540D : $ spent on podcast subscriptions (0-360) valid skip 999996, not stated 999999
+EC_540E : $ spent on news subscriptions (0-2,000) valid skip 999996, not stated 999999
+EC_540F : $ spent on giftcards (0-2,500) valid skip 999996, not stated 999999
+EC_540G : $ spent on gambling (0-5,000) valid skip 999996, not stated 999999
+EC_540H : $ spent on gaming (0-10,000) valid skip 999996, not stated 999999
+EC_540I : $ spent on storage subscriptions (0-2,000) valid skip 999996, not stated 999999
+EC_540J : $ spent on software (0-11,000) valid skip 999996, not stated 999999
+EC_540K : $ spent on other online services/goods (0-11,000) valid skip 999996, not stated 999999
+EC_540X : total $ spent online (0, 17,149) valid skip 999999996, not stated 999999999
+EC_570A : $ spent on physical goods online (0, 56,000) valid skip 999996, not stated 999999
+EC_590B : $ spent on peer-to-peer ride sharing services in Canada (0, 8,000) valid skip 999996, not stated 999999
+EC_590C : $ spent on peer-to-peer ride sharing services outside Canada (0, 5,000) valid skip 999996, not stated 999999
+EC_600B : $ spent on peer-to-peer accommodation services in Canada (0, 15,000) valid skip 999996, not stated 999999
+EC_600C : $ spent on peer-to-peer accommodation services outide Canada (0, 15,000) valid skip 999996, not stated 999999
+EC_620A : $ spent on other services (0, 63,000) valid skip 999996, not stated 999999
+AVGEXP_N : total online spending over all goods and services (0, 65,755) valid skip 9999999996
+
+Everything else is a categorical variable. 
+
+
+### DATA CLEANING
+There is an issue with the continuous variables. For the valid skips, a 6 digit number is inputed. This messes up with summary statistic. Therefore, those values are replaced by the "average" of the other answers based on the survey. 
+
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540a_1 <- small_cius18 %>% 
+                select(EC_540A) %>%
+                filter(EC_540A < 5000)
+
+typeof(ec_540a_1) #list 
+
+max(ec_540a_1)
+
+ec_540_2 <- unlist(ec_540a_1)
+
+mean(ec_540_2)
+median(ec_540_2)
+```
+Replace values with 0 then: 
+
+
+```{r}
+small_ <- small_cius18 %>%
+    mutate(EC_540A = replace(EC_540A, EC_540A > 5000, 0))
+    
+```
+
+8,178 rows were affected. (which aligns with the pdf file)
+
+Just checking if it worked: 
+```{r}
+small_ %>%
+    select(EC_540A) %>%
+    filter(EC_540A > 10000)
+```
+
+EC_540B : $ spent on video subscriptions (0-5,000) valid skip 999996, not stated 999999
+
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540B_1 <- small_cius18 %>% 
+                select(EC_540B) %>%
+                filter(EC_540B < 6000)
+
+max(ec_540B_1)
+
+ec_540B_2 <- unlist(ec_540B_1)
+
+mean(ec_540B_2)
+median(ec_540B_2)
+
+small_ <- small_ %>%
+    mutate(EC_540B = replace(EC_540B, EC_540B > 6000, median(ec_540B_2)))
+
+```
+
+EC_540C : $ spent on e-books (0-1,500) valid skip 999996, not stated 999999
+
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540C_1 <- small_cius18 %>% 
+                select(EC_540C) %>%
+                filter(EC_540C < 2000)
+
+max(ec_540C_1)
+
+ec_540C_2 <- unlist(ec_540C_1)
+
+mean(ec_540C_2)
+median(ec_540C_2)
+
+small_ <- small_ %>%
+    mutate(EC_540C = replace(EC_540C, EC_540C > 6000, median(ec_540C_2)))
+
+```
+
+EC_540D : $ spent on podcast subscriptions (0-360) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540D_1 <- small_cius18 %>% 
+                select(EC_540D) %>%
+                filter(EC_540D < 1000)
+
+max(ec_540D_1)
+
+ec_540D_2 <- unlist(ec_540D_1)
+
+mean(ec_540D_2)
+median(ec_540D_2)
+
+small_ <- small_ %>%
+    mutate(EC_540D = replace(EC_540D, EC_540D > 6000, mean(ec_540D_2)))
+
+```
+
+EC_540E : $ spent on news subscriptions (0-2,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540E_1 <- small_cius18 %>% 
+                select(EC_540E) %>%
+                filter(EC_540E < 3000)
+
+max(ec_540E_1)
+
+ec_540E_2 <- unlist(ec_540E_1)
+
+mean(ec_540E_2)
+median(ec_540E_2)
+
+small_ <- small_ %>%
+    mutate(EC_540E = replace(EC_540E, EC_540E > 6000, median(ec_540E_2)))
+
+```
+
+EC_540F : $ spent on giftcards (0-2,500) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540F_1 <- small_cius18 %>% 
+                select(EC_540F) %>%
+                filter(EC_540F < 3000)
+
+max(ec_540F_1)
+
+ec_540F_2 <- unlist(ec_540F_1)
+
+mean(ec_540F_2)
+median(ec_540F_2)
+
+small_ <- small_ %>%
+    mutate(EC_540F = replace(EC_540F, EC_540F > 3000, median(ec_540F_2)))
+
+```
+
+EC_540G : $ spent on gambling (0-5,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540G_1 <- small_cius18 %>% 
+                select(EC_540G) %>%
+                filter(EC_540G < 6000)
+
+max(ec_540G_1)
+
+ec_540G_2 <- unlist(ec_540G_1)
+
+mean(ec_540G_2)
+median(ec_540G_2)
+
+small_ <- small_ %>%
+    mutate(EC_540G = replace(EC_540G, EC_540G > 6000, median(ec_540G_2)))
+
+```
+
+EC_540H : $ spent on gaming (0-10,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540H_1 <- small_cius18 %>% 
+                select(EC_540H) %>%
+                filter(EC_540H < 11000)
+
+max(ec_540H_1)
+
+ec_540H_2 <- unlist(ec_540H_1)
+
+mean(ec_540H_2)
+median(ec_540H_2)
+
+small_ <- small_ %>%
+    mutate(EC_540H = replace(EC_540H, EC_540H > 11000, median(ec_540H_2)))
+
+```
+
+EC_540I : $ spent on storage subscriptions (0-2,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540I_1 <- small_cius18 %>% 
+                select(EC_540I) %>%
+                filter(EC_540I < 3000)
+
+max(ec_540I_1)
+
+ec_540I_2 <- unlist(ec_540I_1)
+
+mean(ec_540I_2)
+median(ec_540I_2)
+
+small_ <- small_ %>%
+    mutate(EC_540I = replace(EC_540I, EC_540I > 6000, median(ec_540I_2)))
+
+```
+
+EC_540J : $ spent on software (0-11,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540J_1 <- small_cius18 %>% 
+                select(EC_540J) %>%
+                filter(EC_540J < 11000)
+
+max(ec_540J_1)
+
+ec_540J_2 <- unlist(ec_540J_1)
+
+mean(ec_540J_2)
+median(ec_540J_2)
+
+small_ <- small_ %>%
+    mutate(EC_540J = replace(EC_540J, EC_540J > 11000, median(ec_540J_2)))
+
+```
+
+EC_540K : $ spent on other online services/goods (0-11,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540K_1 <- small_cius18 %>% 
+                select(EC_540K) %>%
+                filter(EC_540K < 11000)
+
+max(ec_540K_1)
+
+ec_540K_2 <- unlist(ec_540K_1)
+
+mean(ec_540K_2)
+median(ec_540K_2)
+
+small_ <- small_ %>%
+    mutate(EC_540K = replace(EC_540K, EC_540K > 11000, median(ec_540K_2)))
+
+```
+
+EC_540X : total $ spent online (0, 17,149) valid skip 999999996, not stated 999999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+ec_540X_1 <- small_cius18 %>% 
+                select(EC_540X) %>%
+                filter(EC_540X < 18000)
+
+max(ec_540X_1)
+
+ec_540X_2 <- unlist(ec_540X_1)
+
+mean(ec_540X_2)
+median(ec_540X_2)
+
+small_ <- small_ %>%
+    mutate(EC_540X = replace(EC_540X, EC_540X > 18000, median(ec_540X_2)))
+```
+EC_570A : $ spent on physical goods online (0, 56,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_570A1 <- small_cius18 %>% 
+                select(EC_570A) %>%
+                filter(EC_570A < 60000)
+
+max(EC_570A1)
+
+EC_570A_2 <- unlist(EC_570A1)
+
+mean(EC_570A_2)
+median(EC_570A_2)
+
+small_ <- small_ %>%
+    mutate(EC_570A = replace(EC_570A, EC_570A > 60000, median(EC_570A_2)))
+
+```
+
+EC_590B : $ spent on peer-to-peer ride sharing services in Canada (0, 8,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_590B1 <- small_cius18 %>% 
+                select(EC_590B) %>%
+                filter(EC_590B < 9000)
+
+max(EC_590B1)
+
+EC_590B_2 <- unlist(EC_590B1)
+
+mean(EC_590B_2)
+median(EC_590B_2)
+
+small_ <- small_ %>%
+    mutate(EC_590B = replace(EC_590B, EC_590B > 9000, median(EC_590B_2)))
+
+```
+
+EC_590C : $ spent on peer-to-peer ride sharing services outside Canada (0, 5,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_590C1 <- small_cius18 %>% 
+                select(EC_590C) %>%
+                filter(EC_590C < 6000)
+
+max(EC_590C1)
+
+EC_590C_2 <- unlist(EC_590C1)
+
+mean(EC_590C_2)
+median(EC_590C_2)
+
+small_ <- small_ %>%
+    mutate(EC_590C = replace(EC_590C, EC_590C > 6000, median(EC_590C_2)))
+
+```
+
+EC_600B : $ spent on peer-to-peer accommodation services in Canada (0, 15,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_600B1 <- small_cius18 %>% 
+                select(EC_600B) %>%
+                filter(EC_600B < 16000)
+
+max(EC_600B1)
+
+EC_600B_2 <- unlist(EC_600B1)
+
+mean(EC_600B_2)
+median(EC_600B_2)
+
+small_ <- small_ %>%
+    mutate(EC_600B = replace(EC_600B, EC_600B > 16000, median(EC_600B_2)))
+
+```
+
+EC_600C : $ spent on peer-to-peer accommodation services outide Canada (0, 15,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_600C1 <- small_cius18 %>% 
+                select(EC_600C) %>%
+                filter(EC_600C < 16000)
+
+max(EC_600C1)
+
+EC_600C_2 <- unlist(EC_600C1)
+
+mean(EC_600C_2)
+median(EC_600C_2)
+
+small_ <- small_ %>%
+    mutate(EC_600C = replace(EC_600C, EC_600C > 16000, median(EC_600C_2)))
+
+```
+
+EC_620A : $ spent on other services (0, 63,000) valid skip 999996, not stated 999999
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+EC_620A1 <- small_cius18 %>% 
+                select(EC_620A) %>%
+                filter(EC_620A < 65000)
+
+max(EC_620A1)
+
+EC_620A_2 <- unlist(EC_620A1)
+
+mean(EC_620A_2)
+median(EC_620A_2)
+
+small_ <- small_ %>%
+    mutate(EC_620A = replace(EC_620A, EC_620A > 65000, median(EC_620A_2)))
+
+```
+AVGEXP_N : total online spending over all goods and services (0, 65,755) valid skip 9999999996
+```{r}
+#select everything in each of the columns above except for the skips and not stated 
+#calculate the average of the rest 
+
+AVGEXP_N1 <- small_cius18 %>% 
+                select(AVGEXP_N) %>%
+                filter(AVGEXP_N < 70000)
+
+max(AVGEXP_N1)
+
+AVGEXP_N_2 <- unlist(AVGEXP_N1)
+
+mean(AVGEXP_N_2)
+median(AVGEXP_N_2)
+
+small_ <- small_ %>%
+    mutate(AVGEXP_N = replace(AVGEXP_N, AVGEXP_N > 70000, median(AVGEXP_N_2)))
+
+```
+Therefore, Continuous variables are: 
+
+```{r}
+cont_df <- small_ %>%
+    select(EC_540A, EC_540B, EC_540C, EC_540D, EC_540E, EC_540F, EC_540G, EC_540H, EC_540I, EC_540J, EC_540K,
+           EC_540X, EC_570A, EC_590A, EC_590B, EC_590C, EC_600B, EC_600C, EC_620A, AVGEXP_N)
+```
+
+A glimpse at this dataset: 
+```{r}
+glimpse(cont_df)
+```
+
+- There are 20 continuous variables. 
+
+#### Basic Summary Statistics: 
+- mean, median, min, and max:
+```{r}
+summary(cont_df)
+```
+
+standard deviations: 
+```{r}
+cont_df %>%
+    summarise(
+        across(everything(), sd)
+    )
+
+```
+Some of these are ridiculously large! 
+
+Just to make sure I have access to these data files, I'll save them: 
+```{r}
+library(readr)
+
+write_csv(small_, "small_dataset.csv")
+write_csv(cont_df, "onlyContinuous.csv")
+```
+
+Visualizations will be done in another file! 
+
+Everything else is a categorical variable. 
+```{r}
+categ_df <- small_ %>%
+    select(-c(EC_540A, EC_540B, EC_540C, EC_540D, EC_540E, EC_540F, EC_540G, EC_540H, EC_540I, EC_540J, EC_540K,
+           EC_540X, EC_570A, EC_590A, EC_590B, EC_590C, EC_600B, EC_600C, EC_620A, AVGEXP_N))
+```
+
+The most important information I can get from categorical variables is the count of unique values. But that isn't so interesting. 
+
+Count how many unique values the columns have: 
+```{r}
+cius18 %>%
+    count(province)
+```
+For example, there are 624 instances of province 10 (corresponding to Newfoundland). The maximum number here is 3,618 for province 24 which is Quebec followed immediately by 3,240 for Ontario. 
+
+#### Contingency Tables: categorical variables as frequency counts 
+Our variable of study is: SM_300G
+
+> Here, as an example, I will look at how level of education might affect m-banking usage! 
+
+At this point, the categorical variables can also be converted in a way that would give us good understandable results. For working with categorical varaibles, I chose "forcats" module: 
+```{r}
+library(forcats)
+```
+
+```{r}
+str(categ_df$SM_300G)
+```
+That's bad, because we need everything to be factor here! So, making the necessary changes: 
+
+```{r}
+dim(categ_df)
+```
+
+
+```{r}
+categ_df <- categ_df %>%
+    mutate(across(1:408, as.factor))
+```
+
+Now everything is categorical, so: 
+
+```{r}
+str(categ_df$SM_300G)
+```
+
+The "normal" way would give us the following result: 
+```{r}
+categ_df %>%
+    group_by(SM_300G, G_EDUC) %>%
+    summarize(n = n())
+```
+Seeing this in terms of a survey dataset: 
+```{r}
+svytable(
+    ~SM_300G + G_EDUC,
+    sample_design,
+    Ntotal = sum(weights(sample_design, "sampling"))
+)
+```
+Actual statistical tests can be involved here as well: 
+```{r}
+edu_vs_sm <- svytable(
+    ~SM_300G + G_EDUC,
+    sample_design,
+)
+
+summary(edu_vs_sm, statistic = "F")
+
+```
+```{r}
+summary(edu_vs_sm, statistic = "Wald")
+```
+```{r}
+summary(edu_vs_sm, statistic = "Chisq")
+```
+For the sake of easier understanding, I will change the values on banking column: 
+```{r}
+categ_df <- categ_df %>%
+    mutate(SM_300G = fct_recode(
+        SM_300G,
+        use = "1",
+        no_use = "3",
+        valid_skip = "6",
+        not_stated = "9"
+    ))
+```
+
+So, it looks like: 
+```{r}
+categ_df %>%
+    count(SM_300G)
+```
+You can lump together 6 and 9: 
+
+```{r}
+categ_df <- categ_df %>%
+    mutate(SM_300G = fct_recode(
+        SM_300G, 
+        use = "use", 
+        no_use = "no_use",
+        no_info = "valid_skip",
+        no_info = "not_stated"
+    ))
+```
+
+```{r}
+categ_df %>%
+    count(SM_300G)
+```
+
+
+#### PART 2. Visualizations, Inferences, Information 
+Visualizations are done so in another file. 
+
+---
+### STATISTICAL INFERENCE 
+
+Tabulation functions: 
+```{r}
+tab_mbanking <- function(this_){
+    tab <- svymean(
+        ~interaction(
+            SM_300G,
+            this_,
+            drop = TRUE
+        ),
+        sample_design
+    )
+    
+    return(tab)
+}
+
+prettify <- function(table_, this_, values){
+    pretty <- ftable(
+        table_,
+        rownames = list(
+            usage = c("Use M-banking", "Not use M-banking", "No Information"),
+            levels = values
+        )
+    )
+
+    return(round(pretty * 100, 1))
+}
+
+build_cross_tab <- function(this_){
+    #make the table 
+    var_tab <- tab_mbanking(this_)
+
+    #get the factor levels 
+    var_values <- levels(this_)
+    
+    #make the table pretty
+    pretty_table_age <- prettify(var_tab, this_, var_values)
+
+    return(pretty_table_age)
+}
+
+```
+
+
+#### CONTINUOUS VARIABLES 
+Logit Model: 
+
+```{r}
+
+small_$SM_300G <- as.factor(small_$SM_300G)
+
+survey_design <- svydesign(
+    id = ~phone + 1,
+    data = small_,
+    strata = ~province + factor(unstra_new_var), 
+    weights = ~NULL + wtpm
+)
+```
+
+
+```{r}
+logit1 <- svyglm(
+    SM_300G ~ EC_540A + EC_540B + EC_540C + EC_540D + EC_540E + EC_540F + EC_540G + EC_540H + EC_540I + EC_540J + EC_540K + 
+    EC_540X + EC_570A + EC_590A + EC_590B + EC_590C + EC_600B + EC_600C + EC_620A + AVGEXP_N + 0,
+    design = survey_design,
+    family = quasibinomial
+)
+
+summary(logit1)
+```
+
+The results show that EC_570A, EC_590B & C, EC_600C, EC_620A and AVGEXP_N are not significant. Removing them: 
+
+```{r}
+logit2 <- svyglm(
+    SM_300G ~ EC_540A + EC_540B + EC_540C + EC_540D + EC_540E + EC_540F + EC_540G + EC_540H + EC_540I + EC_540J + EC_540K + 
+    EC_540X + EC_590A + EC_600B + 0,
+    design = survey_design,
+    family = quasibinomial
+)
+
+summary(logit2)
+```
+
+If we do 1 variable: 
+```{r}
+logit_540a <- svyglm(
+    SM_300G ~ EC_540A + 0,
+    design = survey_design,
+    family = quasibinomial
+)
+
+summary(logit_540a)
+```
+
+Accuracy scores of models: 
+```{r}
+psrsq(logit1, method = c("Cox-Snell"))
+psrsq(logit2, method = c("Cox-Snell"))
+```
+
+Statistical test: 
+Wald Test: 
+```{r}
+regTermTest(logit_540a, ~EC_540A)
+```
+the same for the best logit model: 
+```{r}
+regTermTest(logit1, ~EC_540A)
+```
+Which means this variable is significant. 
+
+#### CATEGORICAL VARIABLES 
+A full list available on the Jupyter Notebook. 
+```{r}
+build_cross_tab(categ_df$province)
+```
+
+Statistical Test: 
+```{r}
+svychisq(
+    ~SM_300G + province,
+    sample_design
+)
+```
+
+### MODELING 
